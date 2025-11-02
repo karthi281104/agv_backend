@@ -2,13 +2,12 @@ import express from 'express';
 import bcryptjs from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import { body } from 'express-validator';
-import { PrismaClient } from '@prisma/client';
+import prisma from '../utils/prisma';
 import { handleValidationErrors, asyncHandler } from '../middleware/validation';
 import { authenticateToken } from '../middleware/auth';
 import { ApiResponse, JwtPayload } from '../types';
 
 const router = express.Router();
-const prisma = new PrismaClient();
 
 // POST /api/auth/login
 router.post('/login', [

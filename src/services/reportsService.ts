@@ -219,7 +219,7 @@ export class ReportsService {
     startDate: Date,
     endDate: Date
   ): Promise<CollectionReport> {
-    const [totalCollections, principalCollected, interestCollected, penaltyCollected, overdueRecovered] =
+    const [totalCollections, principalCollected, interestCollected, penaltyCollected, overdueRecovered, totalCollectedToDate, totalDisbursedToDate] =
       await Promise.all([
         // Total collections
         prisma.payment.aggregate({
@@ -266,11 +266,33 @@ export class ReportsService {
             loan: { isOverdue: true },
           },
         }),
+
+        // Cumulative collected up to endDate (aligns with dashboard efficiency)
+        prisma.payment.aggregate({
+          _sum: { amount: true },
+          where: {
+            createdAt: { lte: endDate },
+            status: 'COMPLETED',
+            // Exclude disbursements if present in the same table
+            NOT: { paymentType: 'LOAN_DISBURSEMENT' as any },
+          },
+        }),
+
+        // Cumulative disbursed up to endDate
+        prisma.loan.aggregate({
+          _sum: { principalAmount: true },
+          where: {
+            disbursementDate: { lte: endDate },
+            status: { in: ['ACTIVE', 'COMPLETED', 'DEFAULTED'] },
+          },
+        }),
       ]);
 
     const total = Number(totalCollections._sum.amount || 0);
-    const expected = Number(totalCollections._sum.amount || 0); // Simplified
-    const efficiency = expected > 0 ? (total / expected) * 100 : 0;
+    // Align collection efficiency with dashboard: collected-to-date / disbursed-to-date
+    const collectedToDate = Number(totalCollectedToDate._sum.amount || 0);
+    const disbursedToDate = Number(totalDisbursedToDate._sum.principalAmount || 0);
+    const efficiency = disbursedToDate > 0 ? (collectedToDate / disbursedToDate) * 100 : 0;
 
     return {
       totalCollections: total,

@@ -1,142 +1,204 @@
 import express from 'express';
-import { upload, getFileUrl } from '../middleware/upload';
+import { uploadDocument, uploadGoldPhoto, uploadProfilePhoto, cloudinary } from '../config/cloudinary';
 import { authenticateToken } from '../middleware/auth';
-import { ApiResponse, FileUploadResponse } from '../types';
+import { ApiResponse } from '../types';
 
 const router = express.Router();
 
-// Apply authentication to all routes
+// Apply authentication to all upload routes
 router.use(authenticateToken);
 
-// POST /api/upload/single
-router.post('/single', upload.single('file'), (req: express.Request, res: express.Response) => {
-  if (!req.file) {
-    const response: ApiResponse = {
-      success: false,
-      message: 'No file uploaded'
-    };
-    res.status(400).json(response);
-    return;
-  }
-
-  const fileResponse: FileUploadResponse = {
-    filename: req.file.filename,
-    originalName: req.file.originalname,
-    mimetype: req.file.mimetype,
-    size: req.file.size,
-    url: getFileUrl(req.file.filename)
-  };
-
-  const response: ApiResponse<FileUploadResponse> = {
-    success: true,
-    message: 'File uploaded successfully',
-    data: fileResponse
-  };
-
-  res.json(response);
-});
-
-// POST /api/upload/multiple
-router.post('/multiple', upload.array('files', 10), (req: express.Request, res: express.Response) => {
-  const files = req.files as Express.Multer.File[];
-  
-  if (!files || files.length === 0) {
-    const response: ApiResponse = {
-      success: false,
-      message: 'No files uploaded'
-    };
-    res.status(400).json(response);
-    return;
-  }
-
-  const fileResponses: FileUploadResponse[] = files.map(file => ({
-    filename: file.filename,
-    originalName: file.originalname,
-    mimetype: file.mimetype,
-    size: file.size,
-    url: getFileUrl(file.filename)
-  }));
-
-  const response: ApiResponse<FileUploadResponse[]> = {
-    success: true,
-    message: `${files.length} files uploaded successfully`,
-    data: fileResponses
-  };
-
-  res.json(response);
-});
-
-// POST /api/upload/customer-documents
-router.post('/customer-documents', 
-  upload.fields([
-    { name: 'profileImage', maxCount: 1 },
-    { name: 'aadharImage', maxCount: 1 },
-    { name: 'panImage', maxCount: 1 },
-    { name: 'incomeProof', maxCount: 1 }
-  ]), 
-  (req: express.Request, res: express.Response) => {
-    const files = req.files as { [fieldname: string]: Express.Multer.File[] };
-    
-    if (!files || Object.keys(files).length === 0) {
-      const response: ApiResponse = {
+/**
+ * Upload customer document (Aadhar, PAN, etc.)
+ * POST /api/upload/document
+ */
+router.post('/document', uploadDocument.single('file'), async (req: express.Request, res: express.Response) => {
+  try {
+    if (!req.file) {
+      res.status(400).json({
         success: false,
-        message: 'No files uploaded'
-      };
-      res.status(400).json(response);
+        message: 'No file uploaded'
+      });
       return;
     }
 
-    const uploadedFiles: { [key: string]: FileUploadResponse } = {};
-
-    Object.keys(files).forEach(fieldName => {
-      const file = files[fieldName][0];
-      uploadedFiles[fieldName] = {
-        filename: file.filename,
-        originalName: file.originalname,
-        mimetype: file.mimetype,
-        size: file.size,
-        url: getFileUrl(file.filename)
-      };
-    });
-
+    const file = req.file as any;
+    
     const response: ApiResponse = {
       success: true,
-      message: 'Customer documents uploaded successfully',
-      data: uploadedFiles
+      message: 'Document uploaded successfully',
+      data: {
+        url: file.path,
+        publicId: file.filename,
+        format: file.format,
+        size: file.size,
+        resourceType: file.resource_type,
+      }
     };
 
     res.json(response);
-  }
-);
-
-// POST /api/upload/gold-images
-router.post('/gold-images', upload.array('goldImages', 20), (req: express.Request, res: express.Response) => {
-  const files = req.files as Express.Multer.File[];
-  
-  if (!files || files.length === 0) {
-    const response: ApiResponse = {
+  } catch (error: any) {
+    console.error('Document upload error:', error);
+    res.status(500).json({
       success: false,
-      message: 'No gold images uploaded'
-    };
-    res.status(400).json(response);
-    return;
+      message: error.message || 'Failed to upload document'
+    });
   }
+});
 
-  const imageResponses: FileUploadResponse[] = files.map(file => ({
-    filename: file.filename,
-    originalName: file.originalname,
-    mimetype: file.mimetype,
-    size: file.size,
-    url: getFileUrl(file.filename)
-  }));
+/**
+ * Upload gold item photo
+ * POST /api/upload/gold-photo
+ */
+router.post('/gold-photo', uploadGoldPhoto.single('photo'), async (req: express.Request, res: express.Response) => {
+  try {
+    if (!req.file) {
+      res.status(400).json({
+        success: false,
+        message: 'No photo uploaded'
+      });
+      return;
+    }
 
-  const response: ApiResponse<FileUploadResponse[]> = {
-    success: true,
-    message: `${files.length} gold images uploaded successfully`,
-    data: imageResponses
-  };
+    const file = req.file as any;
+    
+    const response: ApiResponse = {
+      success: true,
+      message: 'Gold item photo uploaded successfully',
+      data: {
+        url: file.path,
+        publicId: file.filename,
+        format: file.format,
+        size: file.size,
+        width: file.width,
+        height: file.height,
+      }
+    };
 
-  res.json(response);
+    res.json(response);
+  } catch (error: any) {
+    console.error('Gold photo upload error:', error);
+    res.status(500).json({
+      success: false,
+      message: error.message || 'Failed to upload gold photo'
+    });
+  }
+});
+
+/**
+ * Upload customer profile photo
+ * POST /api/upload/profile-photo
+ */
+router.post('/profile-photo', uploadProfilePhoto.single('photo'), async (req: express.Request, res: express.Response) => {
+  try {
+    if (!req.file) {
+      res.status(400).json({
+        success: false,
+        message: 'No photo uploaded'
+      });
+      return;
+    }
+
+    const file = req.file as any;
+    
+    const response: ApiResponse = {
+      success: true,
+      message: 'Profile photo uploaded successfully',
+      data: {
+        url: file.path,
+        publicId: file.filename,
+        format: file.format,
+        size: file.size,
+        width: file.width,
+        height: file.height,
+      }
+    };
+
+    res.json(response);
+  } catch (error: any) {
+    console.error('Profile photo upload error:', error);
+    res.status(500).json({
+      success: false,
+      message: error.message || 'Failed to upload profile photo'
+    });
+  }
+});
+
+/**
+ * Upload multiple files (batch upload)
+ * POST /api/upload/multiple
+ */
+router.post('/multiple', uploadDocument.array('files', 10), async (req: express.Request, res: express.Response) => {
+  try {
+    if (!req.files || !Array.isArray(req.files) || req.files.length === 0) {
+      res.status(400).json({
+        success: false,
+        message: 'No files uploaded'
+      });
+      return;
+    }
+
+    const uploadedFiles = (req.files as any[]).map(file => ({
+      url: file.path,
+      publicId: file.filename,
+      format: file.format,
+      size: file.size,
+    }));
+    
+    const response: ApiResponse = {
+      success: true,
+      message: `${uploadedFiles.length} files uploaded successfully`,
+      data: {
+        files: uploadedFiles,
+        count: uploadedFiles.length,
+      }
+    };
+
+    res.json(response);
+  } catch (error: any) {
+    console.error('Multiple files upload error:', error);
+    res.status(500).json({
+      success: false,
+      message: error.message || 'Failed to upload files'
+    });
+  }
+});
+
+/**
+ * Delete file from Cloudinary
+ * DELETE /api/upload/file/:publicId
+ */
+router.delete('/file/:publicId', async (req: express.Request, res: express.Response) => {
+  try {
+    const { publicId } = req.params;
+    
+    if (!publicId) {
+      res.status(400).json({
+        success: false,
+        message: 'Public ID is required'
+      });
+      return;
+    }
+
+    // Replace URL-encoded slashes
+    const decodedPublicId = decodeURIComponent(publicId);
+    
+    const result = await cloudinary.uploader.destroy(decodedPublicId);
+    
+    const response: ApiResponse = {
+      success: result.result === 'ok',
+      message: result.result === 'ok' ? 'File deleted successfully' : 'File not found or already deleted',
+      data: result
+    };
+
+    res.json(response);
+  } catch (error: any) {
+    console.error('File deletion error:', error);
+    res.status(500).json({
+      success: false,
+      message: error.message || 'Failed to delete file'
+    });
+  }
 });
 
 export default router;

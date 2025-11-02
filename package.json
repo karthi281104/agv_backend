@@ -4,11 +4,13 @@
   "description": "Backend API for AGV Gold Lending System",
   "main": "dist/app.js",
   "scripts": {
-    "build": "tsc",
+    "build": "tsc && npx prisma generate && npx prisma migrate deploy",
     "start": "node dist/app.js",
     "dev": "nodemon src/app.ts",
+    "postinstall": "prisma generate",
     "db:generate": "prisma generate",
     "db:migrate": "prisma migrate dev",
+    "db:migrate:deploy": "prisma migrate deploy",
     "db:reset": "prisma migrate reset",
     "db:seed": "ts-node prisma/seed.ts",
     "db:studio": "prisma studio",
@@ -26,7 +28,12 @@
   "type": "commonjs",
   "dependencies": {
     "@prisma/client": "^6.17.0",
+    "@types/compression": "^1.8.1",
+    "@types/node-cron": "^3.0.11",
+    "@types/pdfkit": "^0.17.3",
     "bcryptjs": "^3.0.2",
+    "cloudinary": "^1.41.3",
+    "compression": "^1.8.1",
     "cors": "^2.8.5",
     "dotenv": "^17.2.3",
     "express": "^5.1.0",
@@ -36,6 +43,9 @@
     "jsonwebtoken": "^9.0.2",
     "morgan": "^1.10.1",
     "multer": "^2.0.2",
+    "multer-storage-cloudinary": "^4.0.0",
+    "node-cron": "^4.2.1",
+    "pdfkit": "^0.17.2",
     "prisma": "^6.17.0"
   },
   "devDependencies": {

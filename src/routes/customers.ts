@@ -17,27 +17,71 @@ router.use(authenticateToken);
 router.get('/', [
   query('page').optional().isInt({ min: 1 }),
   query('limit').optional().isInt({ min: 1, max: 100 }),
-  query('search').optional().isString()
+  query('search').optional().isString(),
+  query('status').optional().isString(),
+  query('hasActiveLoans').optional().isBoolean().toBoolean(),
+  query('sort').optional().isString(),
+  query('order').optional().isIn(['asc','desc'])
 ], handleValidationErrors, asyncHandler(async (req: express.Request, res: express.Response) => {
   const { page, limit } = getPaginationParams(req.query);
   const search = req.query.search as string;
+  const statusParam = (req.query.status as string) || '';
+  const hasActiveLoans = (req.query.hasActiveLoans as any) as boolean | undefined;
+  const sort = (req.query.sort as string) || 'createdAt';
+  const order = (req.query.order as 'asc' | 'desc') || 'desc';
   const skip = (page - 1) * limit;
 
-  const where = search ? {
+  // Build status-based filters
+  let statusConditions: any[] = [];
+  if (statusParam) {
+    const statuses = statusParam.split(',').map(s => s.trim()).filter(Boolean);
+    statuses.forEach(s => {
+      if (s === 'active') {
+        statusConditions.push({ isActive: true });
+      } else if (s === 'inactive') {
+        statusConditions.push({ isActive: false });
+      } else if (s === 'pending_verification') {
+        statusConditions.push({ kycVerified: false });
+      }
+    });
+  }
+
+  // Build search filter
+  const searchCondition = search ? {
     OR: [
       { firstName: { contains: search, mode: 'insensitive' as const } },
       { lastName: { contains: search, mode: 'insensitive' as const } },
       { email: { contains: search, mode: 'insensitive' as const } },
       { phone: { contains: search, mode: 'insensitive' as const } }
     ]
-  } : {};
+  } : undefined;
+
+  // Combine where conditions
+  let where: any = {};
+  if (searchCondition) where = { ...where, ...searchCondition };
+  if (statusConditions.length === 1) {
+    where = { AND: [where, statusConditions[0]] };
+  } else if (statusConditions.length > 1) {
+    where = { AND: [where, { OR: statusConditions }] };
+  }
+
+  if (hasActiveLoans === true) {
+    where = {
+      AND: [
+        where,
+        { loans: { some: { status: 'ACTIVE' } } }
+      ]
+    };
+  }
 
   const [customers, total] = await Promise.all([
     prisma.customer.findMany({
       where,
       skip,
       take: limit,
-      orderBy: { createdAt: 'desc' },
+      orderBy: sort === 'name'
+        ? [{ firstName: order } as any, { lastName: order } as any]
+        : { createdAt: order },
       select: {
         id: true,
         firstName: true,
@@ -59,11 +103,46 @@ router.get('/', [
     prisma.customer.count({ where })
   ]);
 
+  // Aggregate active loans and amounts for the page of customers
+  const customerIds = customers.map(c => c.id);
+  const [activeLoansAgg, disbursedAgg] = await Promise.all([
+    prisma.loan.groupBy({
+      by: ['customerId'],
+      where: { customerId: { in: customerIds }, status: 'ACTIVE' },
+      _count: { _all: true },
+      _sum: { outstandingBalance: true }
+    }),
+    prisma.loan.groupBy({
+      by: ['customerId'],
+      where: { customerId: { in: customerIds }, status: { in: ['ACTIVE', 'COMPLETED'] } },
+      _sum: { principalAmount: true }
+    })
+  ]);
+
+  const activeMap = new Map<string, { count: number; outstanding: number }>();
+  activeLoansAgg.forEach(row => {
+    activeMap.set(row.customerId, {
+      count: row._count._all,
+      outstanding: Number(row._sum.outstandingBalance || 0)
+    });
+  });
+  const disbursedMap = new Map<string, number>();
+  disbursedAgg.forEach(row => {
+    disbursedMap.set(row.customerId, Number(row._sum.principalAmount || 0));
+  });
+
+  const enrichedCustomers = customers.map(c => ({
+    ...c,
+    activeLoans: activeMap.get(c.id)?.count || 0,
+    totalOutstanding: activeMap.get(c.id)?.outstanding || 0,
+    totalDisbursed: disbursedMap.get(c.id) || 0,
+  }));
+
   const pagination = calculatePagination(page, limit, total);
   const response: ApiResponse<PaginatedResponse<any>> = {
     success: true,
     message: 'Customers retrieved successfully',
-    data: createPaginatedResponse(customers, pagination)
+    data: createPaginatedResponse(enrichedCustomers, pagination)
   };
 
   res.json(response);
@@ -106,6 +185,8 @@ router.get('/search', [
 
   res.json(response);
 }));
+
+// (moved) export route is defined above '/:id' to avoid being captured by the catch-all
 
 // GET /api/customers/:id
 router.get('/:id', [
@@ -389,6 +470,119 @@ router.delete('/:id', [
   };
 
   res.json(response);
+}));
+
+// GET /api/customers/export - Export customers as CSV (excel-readable)
+router.get('/export', asyncHandler(async (req: express.Request, res: express.Response) => {
+  const format = ((req.query.format as string) || 'csv').toLowerCase();
+  const search = req.query.search as string | undefined;
+  const statusParam = (req.query.status as string) || '';
+  const hasActiveLoans = req.query.hasActiveLoans === 'true';
+
+  // Build where as in list route
+  let where: any = {};
+  if (search) {
+    where = {
+      ...where,
+      OR: [
+        { firstName: { contains: search, mode: 'insensitive' as const } },
+        { lastName: { contains: search, mode: 'insensitive' as const } },
+        { email: { contains: search, mode: 'insensitive' as const } },
+        { phone: { contains: search, mode: 'insensitive' as const } }
+      ]
+    };
+  }
+  const statuses = statusParam ? statusParam.split(',').map(s => s.trim()).filter(Boolean) : [];
+  if (statuses.length > 0) {
+    const statusConditions: any[] = [];
+    statuses.forEach(s => {
+      if (s === 'active') statusConditions.push({ isActive: true });
+      else if (s === 'inactive') statusConditions.push({ isActive: false });
+      else if (s === 'pending_verification') statusConditions.push({ kycVerified: false });
+    });
+    where = statusConditions.length === 1 ? { AND: [where, statusConditions[0]] } : { AND: [where, { OR: statusConditions }] };
+  }
+  if (hasActiveLoans) {
+    where = { AND: [where, { loans: { some: { status: 'ACTIVE' } } }] };
+  }
+
+  const customers = await prisma.customer.findMany({
+    where,
+    orderBy: { createdAt: 'desc' },
+    select: {
+      id: true,
+      firstName: true,
+      lastName: true,
+      email: true,
+      phone: true,
+      city: true,
+      state: true,
+      isActive: true,
+      kycVerified: true,
+      createdAt: true,
+    }
+  });
+
+  const customerIds = customers.map(c => c.id);
+  const [activeLoansAgg, disbursedAgg] = await Promise.all([
+    prisma.loan.groupBy({
+      by: ['customerId'],
+      where: { customerId: { in: customerIds }, status: 'ACTIVE' },
+      _count: { _all: true },
+      _sum: { outstandingBalance: true }
+    }),
+    prisma.loan.groupBy({
+      by: ['customerId'],
+      where: { customerId: { in: customerIds }, status: { in: ['ACTIVE', 'COMPLETED'] } },
+      _sum: { principalAmount: true }
+    })
+  ]);
+
+  const activeMap = new Map<string, { count: number; outstanding: number }>();
+  activeLoansAgg.forEach(row => {
+    activeMap.set(row.customerId, {
+      count: row._count._all,
+      outstanding: Number(row._sum.outstandingBalance || 0)
+    });
+  });
+  const disbursedMap = new Map<string, number>();
+  disbursedAgg.forEach(row => {
+    disbursedMap.set(row.customerId, Number(row._sum.principalAmount || 0));
+  });
+
+  const rows = customers.map(c => {
+    const status = c.isActive ? (c.kycVerified ? 'active' : 'pending_verification') : 'inactive';
+    return [
+      c.id,
+      `${c.firstName} ${c.lastName}`.trim(),
+      c.phone,
+      c.email || '',
+      c.city || '',
+      c.state || '',
+      status,
+      (activeMap.get(c.id)?.count || 0).toString(),
+      (activeMap.get(c.id)?.outstanding || 0).toString(),
+      (disbursedMap.get(c.id) || 0).toString(),
+      c.createdAt.toISOString()
+    ];
+  });
+
+  const header = [
+    'CustomerID','Name','Phone','Email','City','State','Status','ActiveLoans','TotalOutstanding','TotalDisbursed','CreatedAt'
+  ];
+  const csv = [header, ...rows]
+    .map(cols => cols.map(v => {
+      const val = String(v ?? '');
+      return /[",\n]/.test(val) ? `"${val.replace(/"/g, '""')}"` : val;
+    }).join(','))
+    .join('\n');
+
+  const filename = `customers_${new Date().toISOString().slice(0,10)}.${format === 'csv' ? 'csv' : 'csv'}`;
+  // Prepend UTF-8 BOM for better Excel compatibility
+  const bom = '\ufeff';
+  res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+  res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+  res.send(bom + csv);
 }));
 
 export default router;

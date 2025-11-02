@@ -1,4 +1,5 @@
 import express from 'express';
+import PDFDocument from 'pdfkit';
 import { body, param, query } from 'express-validator';
 import { PrismaClient } from '@prisma/client';
 import { handleValidationErrors, asyncHandler } from '../middleware/validation';
@@ -12,6 +13,87 @@ const prisma = new PrismaClient();
 
 // Apply authentication to all routes
 router.use(authenticateToken);
+
+// GET /api/payments/:id/receipt - Generate payment receipt PDF
+router.get('/:id/receipt', [
+  param('id').isString().notEmpty()
+], handleValidationErrors, asyncHandler(async (req: express.Request, res: express.Response) => {
+  const { id } = req.params;
+
+  const payment = await prisma.payment.findUnique({
+    where: { id },
+    include: {
+      loan: {
+        include: {
+          customer: {
+            select: { firstName: true, lastName: true, phone: true, email: true }
+          }
+        }
+      },
+      createdBy: { select: { firstName: true, lastName: true } }
+    }
+  });
+
+  if (!payment) {
+    res.status(404).json({ success: false, message: 'Payment not found' });
+    return;
+  }
+
+  const doc = new PDFDocument({ margin: 40 });
+  const filename = `receipt_${payment.receiptNumber || id}.pdf`;
+  res.setHeader('Content-Type', 'application/pdf');
+  res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+  doc.pipe(res);
+
+  // Header
+  doc
+    .fontSize(18)
+    .text('AGV Finance', { align: 'left' })
+    .fontSize(10)
+    .text('Payment Receipt', { align: 'left' })
+    .moveDown();
+
+  doc
+    .fontSize(16)
+    .text('Receipt', { align: 'right' })
+    .moveDown();
+
+  const customerName = `${payment.loan?.customer?.firstName || ''} ${payment.loan?.customer?.lastName || ''}`.trim();
+
+  // Meta
+  doc.fontSize(12).text('Receipt Details').moveDown(0.5);
+  doc.fontSize(10)
+    .text(`Receipt No: ${payment.receiptNumber || id}`)
+    .text(`Date: ${payment.paymentDate ? new Date(payment.paymentDate as any).toLocaleDateString('en-IN') : new Date().toLocaleDateString('en-IN')}`)
+    .text(`Recorded By: ${payment.createdBy ? payment.createdBy.firstName + ' ' + payment.createdBy.lastName : 'System'}`)
+    .moveDown();
+
+  // Loan/Customer
+  doc.fontSize(12).text('Loan & Customer').moveDown(0.5);
+  doc.fontSize(10)
+    .text(`Loan No: ${payment.loan?.loanNumber || '-'}`)
+    .text(`Customer: ${customerName || '-'}`)
+    .text(`Phone: ${payment.loan?.customer?.phone || '-'}`)
+    .text(`Email: ${payment.loan?.customer?.email || '-'}`)
+    .moveDown();
+
+  // Payment breakdown
+  doc.fontSize(12).text('Payment').moveDown(0.5);
+  doc.fontSize(10)
+    .text(`Amount: ₹${Number(payment.amount).toLocaleString('en-IN')}`)
+    .text(`Type: ${payment.paymentType}`)
+    .text(`Method: ${payment.paymentMethod}`)
+    .text(`Transaction ID: ${payment.transactionId || '-'}`)
+    .text(`Notes: ${payment.notes || '-'}`)
+    .moveDown();
+
+  doc
+    .fontSize(9)
+    .fillColor('#666')
+    .text('Thank you for your payment. This is a computer-generated receipt.', { align: 'center' });
+
+  doc.end();
+}));
 
 // GET /api/payments
 router.get('/', [

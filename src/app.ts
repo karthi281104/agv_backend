@@ -1,6 +1,7 @@
 import express from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
+import compression from 'compression';
 import morgan from 'morgan';
 import rateLimit from 'express-rate-limit';
 import path from 'path';
@@ -23,6 +24,8 @@ import documentRoutes from './routes/documents';
 import goldItemRoutes from './routes/goldItems';
 import overdueRoutes from './routes/overdue';
 import reportsRoutes from './routes/reports';
+import userRoutes from './routes/users';
+import settingsRoutes from './routes/settings';
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -31,6 +34,12 @@ const PORT = process.env.PORT || 3001;
 app.use(helmet({
   crossOriginResourcePolicy: { policy: "cross-origin" }
 }));
+
+// Enable gzip/deflate compression for responses (smaller payloads over the wire)
+app.use(compression());
+
+// Trust proxy for platforms like Vercel/Render/Railway to get real client IPs
+app.set('trust proxy', 1);
 
 // CORS configuration
 app.use(cors({
@@ -88,6 +97,8 @@ app.use('/api/documents', documentRoutes);
 app.use('/api/gold-items', goldItemRoutes);
 app.use('/api/overdue', overdueRoutes);
 app.use('/api/reports', reportsRoutes);
+app.use('/api/users', userRoutes);
+app.use('/api/settings', settingsRoutes);
 
 // 404 handler - catch all unmatched routes
 app.use((req, res) => {

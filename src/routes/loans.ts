@@ -1,4 +1,5 @@
 import express from 'express';
+import PDFDocument from 'pdfkit';
 import { body, param, query } from 'express-validator';
 import { PrismaClient } from '@prisma/client';
 import { handleValidationErrors, asyncHandler } from '../middleware/validation';
@@ -11,6 +12,124 @@ const prisma = new PrismaClient();
 
 // Apply authentication to all routes
 router.use(authenticateToken);
+
+// GET /api/loans/:id/bill - Generate loan bill/invoice PDF
+router.get('/:id/bill', [
+  param('id').isString().notEmpty()
+], handleValidationErrors, asyncHandler(async (req: express.Request, res: express.Response) => {
+  const { id } = req.params;
+
+  const loan = await prisma.loan.findUnique({
+    where: { id },
+    include: {
+      customer: {
+        select: { firstName: true, lastName: true, phone: true, email: true, address: true }
+      },
+      goldItems: true
+    }
+  });
+
+  if (!loan) {
+    res.status(404).json({ success: false, message: 'Loan not found' });
+    return;
+  }
+
+  // Prepare PDF
+  const doc = new PDFDocument({ margin: 40 });
+  const filename = `loan_bill_${loan.loanNumber || id}.pdf`;
+  res.setHeader('Content-Type', 'application/pdf');
+  res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+
+  // Pipe to response
+  doc.pipe(res);
+
+  // Header
+  doc
+    .fontSize(18)
+    .text('AGV Finance', { align: 'left' })
+    .moveDown(0.2)
+    .fontSize(10)
+    .text('Gold Loan Management System')
+    .text('Phone: +91-XXXXXXXXXX  |  Email: support@agvgold.com')
+    .moveDown();
+
+  doc
+    .fontSize(16)
+    .text('Loan Bill / Invoice', { align: 'right' })
+    .moveDown();
+
+  // Customer & Loan Details
+  const custName = `${loan.customer?.firstName || ''} ${loan.customer?.lastName || ''}`.trim();
+  const leftX = 40;
+  const rightX = 320;
+  const startY = doc.y;
+
+  doc.fontSize(12).text('Customer Details', leftX, startY).moveDown(0.5);
+  doc.fontSize(10)
+    .text(`Name: ${custName || 'N/A'}`)
+    .text(`Phone: ${loan.customer?.phone || 'N/A'}`)
+    .text(`Email: ${loan.customer?.email || 'N/A'}`)
+    .moveDown();
+
+  doc.fontSize(12).text('Loan Details', rightX, startY).moveDown(0.5);
+  doc.fontSize(10)
+    .text(`Loan No: ${loan.loanNumber}`)
+    .text(`Principal: ₹${Number(loan.principalAmount).toLocaleString('en-IN')}`)
+    .text(`Interest: ${loan.interestRate}% p.a.`)
+    .text(`Tenure: ${loan.tenure} months`)
+    .text(`EMI: ₹${Number(loan.emiAmount || 0).toLocaleString('en-IN')}`)
+    .text(`Maturity: ${loan.maturityDate ? new Date(loan.maturityDate).toLocaleDateString('en-IN') : 'N/A'}`)
+    .moveDown();
+
+  // Gold Items Table (if any)
+  if (loan.goldItems && loan.goldItems.length > 0) {
+    doc.moveDown().fontSize(12).text('Pledged Gold Items').moveDown(0.5);
+    const tableTop = doc.y;
+    const colWidths = [160, 80, 80, 100];
+    const headers = ['Item Type', 'Weight (g)', 'Purity', 'Est. Value (₹)'];
+
+    // Header row
+    let x = leftX;
+    headers.forEach((h, i) => {
+      doc.font('Helvetica-Bold').fontSize(10).text(h, x, tableTop);
+      x += colWidths[i];
+    });
+    doc.moveDown();
+
+    // Rows
+    let rowY = tableTop + 16;
+    loan.goldItems.forEach((gi) => {
+      let cx = leftX;
+      doc.font('Helvetica').fontSize(10)
+        .text(gi.itemType || '-', cx, rowY, { width: colWidths[0] }); cx += colWidths[0];
+      doc.text(String(gi.weight ?? '-'), cx, rowY, { width: colWidths[1], align: 'right' }); cx += colWidths[1];
+      doc.text(String(gi.purity ?? '-'), cx, rowY, { width: colWidths[2], align: 'right' }); cx += colWidths[2];
+      doc.text(Number(gi.totalValue || 0).toLocaleString('en-IN'), cx, rowY, { width: colWidths[3], align: 'right' });
+      rowY += 16;
+    });
+    doc.moveDown();
+  }
+
+  // Summary
+  const summaryY = doc.y + 10;
+  doc
+    .moveTo(leftX, summaryY)
+    .lineTo(555, summaryY)
+    .strokeColor('#cccccc')
+    .stroke()
+    .fillColor('#000');
+
+  doc.moveDown().font('Helvetica-Bold').text('Summary').moveDown(0.3);
+  doc.font('Helvetica').fontSize(10)
+    .text(`Outstanding Balance: ₹${Number(loan.outstandingBalance || loan.principalAmount).toLocaleString('en-IN')}`)
+    .text(`Status: ${loan.status}`)
+    .moveDown(2)
+    .fontSize(9)
+    .fillColor('#666')
+    .text('This is a computer-generated bill. For questions, contact AGV Finance support.', { align: 'center' });
+
+  doc.end();
+}));
 
 // GET /api/loans
 router.get('/', [

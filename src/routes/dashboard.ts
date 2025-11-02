@@ -22,6 +22,10 @@ router.get('/stats', asyncHandler(async (req: express.Request, res: express.Resp
   const [
     totalCustomers,
     activeCustomers,
+    inactiveCustomers,
+    pendingVerificationCustomers,
+    customersWithActiveLoans,
+    customersByState,
     totalLoans,
     activeLoans,
     pendingLoans,
@@ -37,13 +41,12 @@ router.get('/stats', asyncHandler(async (req: express.Request, res: express.Resp
     totalOutstanding
   ] = await Promise.all([
     // Customer stats
-    prisma.customer.count({ where: { isActive: true } }),
-    prisma.customer.count({ 
-      where: { 
-        isActive: true,
-        createdAt: { gte: thirtyDaysAgo }
-      } 
-    }),
+    prisma.customer.count(), // total customers (all)
+    prisma.customer.count({ where: { isActive: true } }), // active
+    prisma.customer.count({ where: { isActive: false } }), // inactive
+    prisma.customer.count({ where: { kycVerified: false } }), // pending verification
+    prisma.loan.findMany({ where: { status: 'ACTIVE' }, select: { customerId: true }, distinct: ['customerId'] }),
+    prisma.customer.groupBy({ by: ['state'], _count: { state: true } }),
     
     // Loan stats
     prisma.loan.count(),
@@ -132,7 +135,16 @@ router.get('/stats', asyncHandler(async (req: express.Request, res: express.Resp
     customers: {
       total: totalCustomers,
       active: activeCustomers,
-      newThisMonth: activeCustomers
+      inactive: inactiveCustomers,
+      pendingVerification: pendingVerificationCustomers,
+      withActiveLoans: Array.isArray(customersWithActiveLoans) ? customersWithActiveLoans.length : 0,
+      byState: Array.isArray(customersByState)
+        ? customersByState.reduce((acc: Record<string, number>, row: any) => {
+            acc[row.state || 'Unknown'] = row._count.state;
+            return acc;
+          }, {})
+        : {},
+      newThisMonth: 0 // optional, not used on Customers page
     },
     loans: {
       total: totalLoans,
