@@ -42,8 +42,26 @@ app.use(compression());
 app.set('trust proxy', 1);
 
 // CORS configuration
+// Accept a comma-separated list in CORS_ORIGIN and be tolerant to trailing slashes
+const defaultDevOrigins = ['http://localhost:8080', 'http://localhost:8081', 'http://localhost:5173'];
+const rawOrigins = (process.env.CORS_ORIGIN ?? '').trim();
+const configuredOrigins = rawOrigins
+  ? rawOrigins.split(',').map(o => o.trim()).filter(Boolean)
+  : defaultDevOrigins;
+// Normalize by stripping a single trailing slash to avoid mismatch like
+// header 'https://example.com/' vs Origin 'https://example.com'
+const allowedOrigins = configuredOrigins.map(o => o.replace(/\/$/, ''));
+
 app.use(cors({
-  origin: process.env.CORS_ORIGIN || ['http://localhost:8080', 'http://localhost:8081', 'http://localhost:5173'],
+  origin: (origin, callback) => {
+    // Allow non-browser requests with no Origin (e.g., curl, health checks)
+    if (!origin) return callback(null, true);
+    const normalized = origin.replace(/\/$/, '');
+    if (allowedOrigins.includes(normalized)) {
+      return callback(null, true);
+    }
+    return callback(new Error(`Not allowed by CORS: ${origin}`));
+  },
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization']
