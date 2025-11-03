@@ -68,8 +68,8 @@ const corsOptions: cors.CorsOptions = {
 };
 
 app.use(cors(corsOptions));
-// Explicitly handle preflight for all routes
-app.options('*', cors(corsOptions));
+// Explicitly handle preflight for all routes (Express 5: use RegExp, '*' string throws)
+app.options(/.*/, cors(corsOptions));
 
 // Rate limiting
 const limiter = rateLimit({
