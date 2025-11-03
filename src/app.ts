@@ -52,7 +52,7 @@ const configuredOrigins = rawOrigins
 // header 'https://example.com/' vs Origin 'https://example.com'
 const allowedOrigins = configuredOrigins.map(o => o.replace(/\/$/, ''));
 
-app.use(cors({
+const corsOptions: cors.CorsOptions = {
   origin: (origin, callback) => {
     // Allow non-browser requests with no Origin (e.g., curl, health checks)
     if (!origin) return callback(null, true);
@@ -65,7 +65,11 @@ app.use(cors({
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization']
-}));
+};
+
+app.use(cors(corsOptions));
+// Explicitly handle preflight for all routes
+app.options('*', cors(corsOptions));
 
 // Rate limiting
 const limiter = rateLimit({
