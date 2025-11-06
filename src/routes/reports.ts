@@ -115,7 +115,6 @@ router.get('/monthly-trends', [
   res.json(response);
 }));
 
-export default router;
 // New Combined All-in-One PDF Report
 // GET /api/reports/all-in-one.pdf?startDate=YYYY-MM-DD&endDate=YYYY-MM-DD&months=12
 router.get('/all-in-one.pdf', asyncHandler(async (req: express.Request, res: express.Response) => {
@@ -228,3 +227,5 @@ router.get('/all-in-one.pdf', asyncHandler(async (req: express.Request, res: exp
 
   doc.end();
 }));
+
+export default router;
