@@ -2,7 +2,7 @@ import express from 'express';
 import { body } from 'express-validator';
 import bcryptjs from 'bcryptjs';
 import prisma from '../utils/prisma';
-import { authenticateToken } from '../middleware/auth';
+import { authenticateToken, requireAdmin } from '../middleware/auth';
 import { handleValidationErrors, asyncHandler } from '../middleware/validation';
 import { ApiResponse } from '../types';
 
@@ -138,6 +138,38 @@ router.put('/me/password', [
   await prisma.user.update({ where: { id: userId }, data: { password: hashed } });
 
   const response: ApiResponse = { success: true, message: 'Password updated successfully' };
+  res.json(response);
+}));
+
+// GET /api/users - List all users (Admin only)
+router.get('/', requireAdmin, asyncHandler(async (req: express.Request, res: express.Response) => {
+  const users = await prisma.user.findMany({
+    select: {
+      id: true,
+      email: true,
+      firstName: true,
+      lastName: true,
+      role: true,
+      isActive: true,
+      createdAt: true
+    },
+    orderBy: { createdAt: 'desc' }
+  });
+
+  const response: ApiResponse = { success: true, message: 'Users retrieved', data: users };
+  res.json(response);
+}));
+
+// DELETE /api/users/:id - Deactivate user (Admin only)
+router.delete('/:id', requireAdmin, asyncHandler(async (req: express.Request, res: express.Response) => {
+  const { id } = req.params;
+
+  await prisma.user.update({
+    where: { id },
+    data: { isActive: false }
+  });
+
+  const response: ApiResponse = { success: true, message: 'User deactivated successfully' };
   res.json(response);
 }));
 

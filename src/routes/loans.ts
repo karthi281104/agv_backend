@@ -3,7 +3,7 @@ import PDFDocument from 'pdfkit';
 import { body, param, query } from 'express-validator';
 import { PrismaClient } from '@prisma/client';
 import { handleValidationErrors, asyncHandler } from '../middleware/validation';
-import { authenticateToken } from '../middleware/auth';
+import { authenticateToken, requireManagerOrAdmin } from '../middleware/auth';
 import { ApiResponse, CreateLoanRequest, PaginatedResponse } from '../types';
 import { getPaginationParams, calculatePagination, createPaginatedResponse, generateLoanNumber, calculateEMI, calculateLTV } from '../utils/helpers';
 
@@ -338,6 +338,7 @@ router.post('/', [
 
 // PUT /api/loans/:id/approve
 router.put('/:id/approve', [
+  requireManagerOrAdmin,
   param('id').isString().notEmpty(),
   body('remarks').optional().isString()
 ], handleValidationErrors, asyncHandler(async (req: express.Request, res: express.Response) => {
@@ -374,6 +375,7 @@ router.put('/:id/approve', [
 
 // PUT /api/loans/:id/reject
 router.put('/:id/reject', [
+  requireManagerOrAdmin,
   param('id').isString().notEmpty(),
   body('remarks').notEmpty().withMessage('Rejection reason is required')
 ], handleValidationErrors, asyncHandler(async (req: express.Request, res: express.Response) => {
@@ -399,6 +401,7 @@ router.put('/:id/reject', [
 
 // PUT /api/loans/:id/disburse
 router.put('/:id/disburse', [
+  requireManagerOrAdmin,
   param('id').isString().notEmpty()
 ], handleValidationErrors, asyncHandler(async (req: express.Request, res: express.Response) => {
   const { id } = req.params;

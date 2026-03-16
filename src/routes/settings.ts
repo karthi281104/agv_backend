@@ -1,7 +1,7 @@
 import express from 'express';
 import { body } from 'express-validator';
 import prisma from '../utils/prisma';
-import { authenticateToken } from '../middleware/auth';
+import { authenticateToken, requireAdmin } from '../middleware/auth';
 import { handleValidationErrors, asyncHandler } from '../middleware/validation';
 import { ApiResponse } from '../types';
 
@@ -110,6 +110,26 @@ router.put('/preferences', [
   await setJson(key, updated, 'user', 'User notification and display preferences');
   const response: ApiResponse = { success: true, message: 'Preferences updated', data: updated };
   res.json(response);
+}));
+
+// POST /api/settings/backup - Export database snapshot as JSON (Admin only)
+router.post('/backup', requireAdmin, asyncHandler(async (req: express.Request, res: express.Response) => {
+  const models = ['user', 'customer', 'loan', 'payment', 'goldItem', 'document', 'settings', 'goldRate'];
+  const backupData: Record<string, any> = {};
+
+  for (const model of models) {
+    const prismaModel = (prisma as any)[model];
+    if (prismaModel) {
+      backupData[model] = await prismaModel.findMany();
+    }
+  }
+
+  const jsonString = JSON.stringify(backupData, null, 2);
+  const filename = `agv_backup_${new Date().toISOString().replace(/[:.]/g, '-')}.json`;
+
+  res.setHeader('Content-Type', 'application/json');
+  res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+  res.send(jsonString);
 }));
 
 export default router;

@@ -4,7 +4,7 @@ import jwt from 'jsonwebtoken';
 import { body } from 'express-validator';
 import prisma from '../utils/prisma';
 import { handleValidationErrors, asyncHandler } from '../middleware/validation';
-import { authenticateToken } from '../middleware/auth';
+import { authenticateToken, requireAdmin } from '../middleware/auth';
 import { ApiResponse, JwtPayload } from '../types';
 
 const router = express.Router();
@@ -50,24 +50,58 @@ router.post('/login', [
     return;
   }
 
-  // Generate JWT token
+  // Generate JWT tokens
   const payload: JwtPayload = {
     userId: user.id,
     email: user.email,
     role: user.role
   };
 
-  const token = jwt.sign(
+  const accessToken = jwt.sign(
     payload,
     process.env.JWT_SECRET!,
-    { expiresIn: process.env.JWT_EXPIRES_IN || '24h' } as jwt.SignOptions
+    { expiresIn: '15m' } as jwt.SignOptions
   );
+
+  const refreshToken = jwt.sign(
+    payload,
+    process.env.JWT_SECRET!,
+    { expiresIn: '7d' } as jwt.SignOptions
+  );
+
+  // Store refresh token in DB
+  const expiresAt = new Date();
+  expiresAt.setDate(expiresAt.getDate() + 7); // 7 days from now
+
+  await prisma.refreshToken.create({
+    data: {
+      token: refreshToken,
+      userId: user.id,
+      expiresAt
+    }
+  });
+
+  // Set HTTP-only cookies
+  const cookieOptions = {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === 'production',
+    sameSite: 'lax' as const // Adjust to 'none' if backend/frontend domains differ extensively and using HTTPS everywhere
+  };
+
+  res.cookie('accessToken', accessToken, {
+    ...cookieOptions,
+    maxAge: 15 * 60 * 1000 // 15 minutes
+  });
+
+  res.cookie('refreshToken', refreshToken, {
+    ...cookieOptions,
+    maxAge: 7 * 24 * 60 * 60 * 1000 // 7 days
+  });
 
   const response: ApiResponse = {
     success: true,
     message: 'Login successful',
     data: {
-      token,
       user: {
         id: user.id,
         email: user.email,
@@ -81,14 +115,82 @@ router.post('/login', [
   res.json(response);
 }));
 
-// POST /api/auth/register (for creating new staff users)
-router.post('/register', [
-  body('email').isEmail().withMessage('Valid email is required'),
-  body('password').isLength({ min: 6 }).withMessage('Password must be at least 6 characters'),
-  body('firstName').notEmpty().withMessage('First name is required'),
-  body('lastName').notEmpty().withMessage('Last name is required'),
-  body('role').isIn(['ADMIN', 'EMPLOYEE', 'MANAGER']).withMessage('Valid role is required')
-], handleValidationErrors, asyncHandler(async (req: express.Request, res: express.Response) => {
+// POST /api/auth/refresh
+router.post('/refresh', asyncHandler(async (req: express.Request, res: express.Response) => {
+  const refreshToken = req.cookies?.refreshToken;
+
+  if (!refreshToken) {
+    const response: ApiResponse = { success: false, message: 'Refresh token not found' };
+    res.status(401).json(response);
+    return;
+  }
+
+  // Find token in DB
+  const storedToken = await prisma.refreshToken.findUnique({
+    where: { token: refreshToken },
+    include: { user: true }
+  });
+
+  if (!storedToken || storedToken.expiresAt < new Date()) {
+    // Basic protection against token reuse -> could also delete here
+    if (storedToken) {
+       await prisma.refreshToken.delete({ where: { id: storedToken.id } });
+    }
+    res.clearCookie('accessToken');
+    res.clearCookie('refreshToken');
+    const response: ApiResponse = { success: false, message: 'Session expired. Please log in again.' };
+    res.status(403).json(response);
+    return;
+  }
+
+  // Verify token signature
+  try {
+    const decoded = jwt.verify(refreshToken, process.env.JWT_SECRET!) as JwtPayload;
+    
+    // Generate new Access Token
+    const payload: JwtPayload = {
+      userId: storedToken.user.id,
+      email: storedToken.user.email,
+      role: storedToken.user.role
+    };
+
+    const newAccessToken = jwt.sign(
+      payload,
+      process.env.JWT_SECRET!,
+      { expiresIn: '15m' } as jwt.SignOptions
+    );
+
+    // Update Access Token cookie
+    res.cookie('accessToken', newAccessToken, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'lax',
+      maxAge: 15 * 60 * 1000 // 15 minutes
+    });
+
+    const response: ApiResponse = { success: true, message: 'Token refreshed successfully' };
+    res.json(response);
+  } catch (error) {
+    // Invalid signature on refresh token
+    await prisma.refreshToken.delete({ where: { id: storedToken.id } });
+    res.clearCookie('accessToken');
+    res.clearCookie('refreshToken');
+    const response: ApiResponse = { success: false, message: 'Invalid refresh token' };
+    res.status(403).json(response);
+  }
+}));
+
+// POST /api/auth/register — Admin-only: create new staff accounts
+router.post('/register',
+  authenticateToken,   // Must be logged in
+  requireAdmin,        // Must be ADMIN role
+  [
+    body('email').isEmail().withMessage('Valid email is required'),
+    body('password').isLength({ min: 8 }).withMessage('Password must be at least 8 characters'),
+    body('firstName').notEmpty().withMessage('First name is required'),
+    body('lastName').notEmpty().withMessage('Last name is required'),
+    body('role').isIn(['ADMIN', 'EMPLOYEE', 'MANAGER']).withMessage('Valid role is required')
+  ], handleValidationErrors, asyncHandler(async (req: express.Request, res: express.Response) => {
   const { email, password, firstName, lastName, role } = req.body;
 
   // Check if user already exists
@@ -161,8 +263,19 @@ router.get('/profile', authenticateToken, asyncHandler(async (req: express.Reque
 
 // POST /api/auth/logout
 router.post('/logout', authenticateToken, asyncHandler(async (req: express.Request, res: express.Response) => {
-  // In a more advanced implementation, you might invalidate the token in a blacklist
-  // For now, we just return success since JWT is stateless
+  const refreshToken = req.cookies?.refreshToken;
+  
+  if (refreshToken) {
+    // Remove token from database
+    await prisma.refreshToken.deleteMany({
+      where: { token: refreshToken }
+    });
+  }
+
+  // Clear HTTP-only cookies
+  res.clearCookie('accessToken');
+  res.clearCookie('refreshToken');
+
   const response: ApiResponse = {
     success: true,
     message: 'Logged out successfully'

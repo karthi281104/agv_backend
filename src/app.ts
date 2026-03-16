@@ -26,6 +26,7 @@ import overdueRoutes from './routes/overdue';
 import reportsRoutes from './routes/reports';
 import userRoutes from './routes/users';
 import settingsRoutes from './routes/settings';
+import { startOverdueCheckJob } from './jobs/overdueCheckJob';
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -42,33 +43,19 @@ app.use(compression());
 app.set('trust proxy', 1);
 
 // CORS configuration
-// Accept a comma-separated list in CORS_ORIGIN and be tolerant to trailing slashes
-const defaultDevOrigins = ['http://localhost:8080', 'http://localhost:8081', 'http://localhost:5173'];
-const rawOrigins = (process.env.CORS_ORIGIN ?? '').trim();
-const configuredOrigins = rawOrigins
-  ? rawOrigins.split(',').map(o => o.trim()).filter(Boolean)
-  : defaultDevOrigins;
-// Normalize by stripping a single trailing slash to avoid mismatch like
-// header 'https://example.com/' vs Origin 'https://example.com'
-const allowedOrigins = configuredOrigins.map(o => o.replace(/\/$/, ''));
-
+// In production: restrict to the exact frontend domain via CORS_ORIGIN env variable.
+// In development: echo any origin so the Vite dev server on any port just works.
 const corsOptions: cors.CorsOptions = {
-  origin: (origin, callback) => {
-    // Allow non-browser requests with no Origin (e.g., curl, health checks)
-    if (!origin) return callback(null, true);
-    const normalized = origin.replace(/\/$/, '');
-    if (allowedOrigins.includes(normalized)) {
-      return callback(null, true);
-    }
-    return callback(new Error(`Not allowed by CORS: ${origin}`));
-  },
+  origin: process.env.NODE_ENV === 'production'
+    ? (process.env.CORS_ORIGIN || 'http://localhost:8080')
+    : true,  // echo any origin in dev
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization']
+  allowedHeaders: ['Content-Type', 'Authorization', 'Origin', 'X-Requested-With', 'Accept', 'Cookie']
 };
 
 app.use(cors(corsOptions));
-// Explicitly handle preflight for all routes (Express 5: use RegExp, '*' string throws)
+// Explicitly handle preflight for all routes
 app.options(/.*/, cors(corsOptions));
 
 // Rate limiting
@@ -85,6 +72,9 @@ app.use('/api', limiter);
 // Body parsing middleware
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
+
+import cookieParser from 'cookie-parser';
+app.use(cookieParser());
 
 // Logging middleware
 if (process.env.NODE_ENV !== 'production') {
@@ -143,6 +133,9 @@ app.listen(PORT, () => {
   if (process.env.NODE_ENV !== 'production') {
     console.log(`📖 API Base URL: http://localhost:${PORT}/api`);
   }
+
+  // Start scheduled jobs
+  startOverdueCheckJob();
 });
 
 export default app;

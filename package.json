@@ -5,8 +5,10 @@
   "main": "dist/app.js",
   "scripts": {
     "build": "tsc",
-  "prestart": "prisma migrate deploy || true && prisma db push",
+    "build:prod": "tsc --outDir dist",
     "start": "node dist/app.js",
+    "start:prod": "NODE_ENV=production node dist/app.js",
+    "prestart": "prisma migrate deploy || true && prisma db push",
     "dev": "nodemon src/app.ts",
     "postinstall": "prisma generate",
     "db:generate": "prisma generate",
@@ -35,13 +37,14 @@
     "bcryptjs": "^3.0.2",
     "cloudinary": "^1.41.3",
     "compression": "^1.8.1",
+    "cookie-parser": "^1.4.7",
     "cors": "^2.8.5",
     "dotenv": "^17.2.3",
     "express": "^5.1.0",
     "express-rate-limit": "^8.1.0",
     "express-validator": "^7.2.1",
     "helmet": "^8.1.0",
-    "jsonwebtoken": "^9.0.2",
+    "jsonwebtoken": "^9.0.3",
     "morgan": "^1.10.1",
     "multer": "^2.0.2",
     "multer-storage-cloudinary": "^4.0.0",
@@ -51,6 +54,7 @@
   },
   "devDependencies": {
     "@types/bcryptjs": "^2.4.6",
+    "@types/cookie-parser": "^1.4.10",
     "@types/cors": "^2.8.19",
     "@types/express": "^5.0.3",
     "@types/helmet": "^0.0.48",
@@ -62,8 +66,7 @@
     "nodemon": "^3.1.10",
     "ts-node": "^10.9.2",
     "typescript": "^5.9.3"
-  }
-  ,
+  },
   "prisma": {
     "seed": "ts-node prisma/seed-enhanced.ts"
   }

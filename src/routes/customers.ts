@@ -1,14 +1,14 @@
 import express from 'express';
 import { body, param, query } from 'express-validator';
-import { PrismaClient } from '@prisma/client';
+import prisma from '../utils/prisma';
 import { handleValidationErrors, asyncHandler } from '../middleware/validation';
-import { authenticateToken } from '../middleware/auth';
+import { authenticateToken, requireManagerOrAdmin } from '../middleware/auth';
 import { upload } from '../middleware/upload';
 import { ApiResponse, CreateCustomerRequest, PaginatedResponse } from '../types';
 import { getPaginationParams, calculatePagination, createPaginatedResponse } from '../utils/helpers';
 
 const router = express.Router();
-const prisma = new PrismaClient();
+
 
 // Apply authentication to all routes
 router.use(authenticateToken);
@@ -455,6 +455,7 @@ router.get('/:id/loans', [
 
 // DELETE /api/customers/:id
 router.delete('/:id', [
+  requireManagerOrAdmin,
   param('id').isString().notEmpty()
 ], handleValidationErrors, asyncHandler(async (req: express.Request, res: express.Response) => {
   const { id } = req.params;

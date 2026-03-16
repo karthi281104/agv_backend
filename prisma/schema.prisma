@@ -56,8 +56,21 @@ model User {
   createdLoans    Loan[]    @relation("LoanCreatedBy")
   approvedLoans   Loan[]    @relation("LoanApprovedBy")
   createdPayments Payment[] @relation("PaymentCreatedBy")
+  refreshTokens   RefreshToken[]
 
   @@map("users")
+}
+
+model RefreshToken {
+  id        String   @id @default(cuid())
+  token     String   @unique
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+  @@map("refresh_tokens")
 }
 
 model Customer {
