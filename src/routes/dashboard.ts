@@ -1,11 +1,10 @@
 import express from 'express';
-import { PrismaClient } from '@prisma/client';
+import prisma from '../utils/prisma';
 import { authenticateToken } from '../middleware/auth';
 import { ApiResponse } from '../types';
 import { asyncHandler } from '../middleware/validation';
 
 const router = express.Router();
-const prisma = new PrismaClient();
 
 // Apply authentication to all routes
 router.use(authenticateToken);

@@ -85,7 +85,9 @@ router.post('/login', [
   const cookieOptions = {
     httpOnly: true,
     secure: process.env.NODE_ENV === 'production',
-    sameSite: 'lax' as const // Adjust to 'none' if backend/frontend domains differ extensively and using HTTPS everywhere
+    // 'none' is required for cross-domain cookies (Vercel frontend → Railway backend)
+    // sameSite: 'none' requires secure: true (HTTPS), which is enforced in production above
+    sameSite: process.env.NODE_ENV === 'production' ? 'none' as const : 'lax' as const
   };
 
   res.cookie('accessToken', accessToken, {
@@ -164,7 +166,7 @@ router.post('/refresh', asyncHandler(async (req: express.Request, res: express.R
     res.cookie('accessToken', newAccessToken, {
       httpOnly: true,
       secure: process.env.NODE_ENV === 'production',
-      sameSite: 'lax',
+      sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax',
       maxAge: 15 * 60 * 1000 // 15 minutes
     });
 

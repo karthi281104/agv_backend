@@ -8,7 +8,7 @@
     "build:prod": "tsc --outDir dist",
     "start": "node dist/app.js",
     "start:prod": "NODE_ENV=production node dist/app.js",
-    "prestart": "prisma migrate deploy || true && prisma db push",
+    "prestart": "prisma migrate deploy",
     "dev": "nodemon src/app.ts",
     "postinstall": "prisma generate",
     "db:generate": "prisma generate",
